@@ -7,55 +7,80 @@ dotenv.config();
 
 @Injectable()
 export class VtexService {
-  private readonly baseURL = 'https://whirlpoolgtm.vtexcommercestable.com.br/api/dataentities/CL';
-  
-  private readonly getHeaders = {
+  private readonly sourceURL = 'https://whirlpoolgtm.vtexcommercestable.com.br/api/dataentities/CL/search';
+  private readonly targetURL = 'https://whirlpoolgtml.vtexcommercestable.com.br/api/dataentities/CL/documents';
+
+  private readonly sourceHeaders = {
     'Content-Type': 'application/json',
-    'VtexIdclientAutCookie': process.env.VTEX_GET_AUTH_TOKEN, // 🔑 Key para obtener datos
+    'VtexIdclientAutCookie': process.env.VTEX_AUTH_TOKEN_SOURCE,
   };
 
-  private readonly saveHeaders = {
+  private readonly targetHeaders = {
     'Content-Type': 'application/json',
-    'VtexIdclientAutCookie': process.env.VTEX_SAVE_AUTH_TOKEN, // 🔑 Key para guardar datos
+    'VtexIdclientAutCookie': process.env.VTEX_AUTH_TOKEN_TARGET,
   };
 
-  /**
-   * Obtiene un solo cliente desde VTEX
-   */
+  // Obtener un solo cliente de la cuenta WhirlpoolGTM
   async getSingleCustomer(): Promise<Customer | null> {
     try {
-      console.log('📥 Obteniendo un cliente de VTEX...');
+      console.log('📡 Solicitando un cliente de WhirlpoolGTM...');
       const response: AxiosResponse<Customer[]> = await axios.get(
-        `${this.baseURL}/search?_page=1&_pageSize=1`,
-        { headers: this.getHeaders }
+        `${this.sourceURL}?_page=1&_pageSize=1`,
+        { headers: this.sourceHeaders }
       );
 
-      return response.data.length > 0 ? response.data[0] : null;
+      if (response.data.length === 0) {
+        console.warn('⚠️ No se encontraron clientes en la fuente.');
+        return null;
+      }
+      
+      console.log('✅ Cliente obtenido:', response.data[0]);
+      return response.data[0];
     } catch (error) {
-      console.error('❌ Error al obtener cliente:', error.response?.data || error.message);
+      console.error('❌ Error al obtener cliente de VTEX:', error.response?.data || error.message);
       return null;
     }
   }
 
-  /**
-   * Guarda un cliente en VTEX usando la clave de guardado
-   */
-  async saveCustomerToMastercard(customer: Customer): Promise<void> {
+  // Guardar el cliente en la cuenta WhirlpoolGTML en la entidad Mastercard CL
+  async saveCustomerToMastercardCL(customer: Customer): Promise<boolean> {
     try {
-      const saveURL = 'https://whirlpoolgtml.vtexcommercestable.com.br/api/dataentities/CL/documents';
-  
-      // 🔑 Clave de API para GUARDAR en Mastercard CL
-      const headers = {
-        'Content-Type': 'application/json',
-        'VtexIdclientAutCookie': process.env.VTEX_MASTERCARD_AUTH_TOKEN, // Nueva API Key
-      };
-  
-      const response = await axios.post(saveURL, customer, { headers });
-  
+      console.log('📡 Enviando cliente a Mastercard CL...');
+      const response = await axios.post(this.targetURL, customer, {
+        headers: this.targetHeaders,
+      });
       console.log('✅ Cliente guardado en Mastercard CL:', response.data);
+      return true;
     } catch (error) {
       console.error('❌ Error al guardar cliente en Mastercard CL:', error.response?.data || error.message);
-      throw error;
+      return false;
     }
   }
-}  
+
+  // Función principal que obtiene y guarda el cliente
+  async transferCustomer(): Promise<{ message: string }> {
+    const customer = await this.getSingleCustomer();
+    if (!customer) {
+      return { message: '⚠️ No se encontró ningún cliente en VTEX.' };
+    }
+
+    const success = await this.saveCustomerToMastercardCL(customer);
+    return success
+      ? { message: '✅ Cliente transferido correctamente.' }
+      : { message: '❌ Error al transferir el cliente.' };
+  }
+}
+
+import { Controller, Get } from '@nestjs/common';
+import { VtexService } from '../services/vtex.service';
+
+@Controller('vtex')
+export class VtexController {
+  constructor(private readonly vtexService: VtexService) {}
+
+  @Get('transfer-customer')
+  async transferCustomer(): Promise<{ message: string }> {
+    console.log('📡 Iniciando transferencia de cliente...');
+    return this.vtexService.transferCustomer();
+  }
+}
